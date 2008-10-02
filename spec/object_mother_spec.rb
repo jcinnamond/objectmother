@@ -2,6 +2,7 @@
 class User
   def self.create (*args); end
   def self.create! (*args); end
+  def self.find_by_id (*args); end
   def self.destroy (*args); end
 end
 
@@ -24,36 +25,42 @@ describe "ObjectMother" do
 
   describe "prototypes" do
     describe "directory" do
-      it "should use paramaters" do
+      before(:each) do
+        ObjectMother.prototype_dir = nil
+        stat = mock(File::Stat, :directory? => true)
+        File.stub!(:stat).and_return(stat)
+      end
+      
+      it "should use the class attribute" do
         dir = @prototypes_dir
-        om = ObjectMother.new(dir)
-        om.prototype_dir.should == dir
+        ObjectMother.prototype_dir = dir
+        ObjectMother.prototype_dir.should == dir
       end
 
       it "should use rspec if available" do
         dir = File.join(RAILS_ROOT, 'spec', 'object_mother')
         File.stub!(:exists?).with(dir).and_return(true)
-        om = ObjectMother.new(dir)
-        om.prototype_dir.should == dir
+        ObjectMother.prototype_dir.should == dir
       end
 
       it "should use test if rspec is not available" do
+        spec_dir = File.join(RAILS_ROOT, 'spec', 'object_mother')
         dir = File.join(RAILS_ROOT, 'test', 'object_mother')
+        File.stub!(:exists?).with(spec_dir).and_return(false)
         File.stub!(:exists?).with(dir).and_return(true)
-        om = ObjectMother.new(dir)
-        om.prototype_dir.should == dir
+        ObjectMother.prototype_dir.should == dir
       end
     end
 
     it "should include the User module" do
       dir = File.join(File.dirname(__FILE__), 'prototypes')
-      ObjectMother.new(dir)
+      ObjectMother.prototype_dir
       Object.constants.should include('User')
     end
 
     it "should cope with prototype directory being unset" do
       lambda do 
-        ObjectMother.new
+        ObjectMother.prototype_dir
       end.should_not raise_error(Exception)
     end
   end
@@ -61,7 +68,7 @@ describe "ObjectMother" do
   describe "defining prototypes" do
     before(:each) do
       dir = File.join(File.dirname(__FILE__), 'prototypes')
-      @object_mother = ObjectMother.new(dir)
+      ObjectMother.prototype_dir = dir
     end
 
     it "should call define with the class name" do
@@ -77,9 +84,9 @@ describe "ObjectMother" do
 
     it "should create a new method matching the first argument to define" do
       name = :betty
-      ObjectMother.instance_methods.should_not include(name.to_s)
+      ObjectMother.methods.should_not include(name.to_s)
       ObjectMother.define_user name
-      ObjectMother.instance_methods.should include(name.to_s)
+      ObjectMother.methods.should include(name.to_s)
     end
   end
 
@@ -88,25 +95,24 @@ describe "ObjectMother" do
       @name = :wilma
       @args = { :name => 'wilma' }
       ObjectMother.define_user @name, @args
-      @om = ObjectMother.new(@prototypes_dir)
     end
 
     it "should try to create" do
       User.should_receive(:create).with(@args)
-      @om.send(@name)
+      ObjectMother.send(@name)
     end
 
     it "should merge in the any arguments" do
       args = { :married_to => :fred }
       User.should_receive(:create).with(@args.merge(args))
-      @om.send(@name, args)
+      ObjectMother.send(@name, args)
     end
 
     it "should return the object" do
       user = User.new
       user.stub!(:id)
       User.stub!(:create).and_return(user)
-      @om.send(@name).should == user
+      ObjectMother.send(@name).should == user
     end
   end
 
@@ -118,16 +124,16 @@ describe "ObjectMother" do
 
       @name = :barney
       ObjectMother.define(@name) { |a| a.upcase }
-      @om = ObjectMother.new(@prototypes_dir)
+      ObjectMother.prototype_dir = @prototypes_dir
     end
 
     it "should call the proc" do
-      @om.send(@name, 'hello').should == "HELLO"
+      ObjectMother.send(@name, 'hello').should == "HELLO"
     end
 
     it "should cache the result if it has an ID" do
-      @om.send(@name, 'hello')
-      @om.cached_ids[@name].should == @id
+      ObjectMother.send(@name, 'hello')
+      ObjectMother.cached_ids[@name].should == @id
     end
   end
 
@@ -140,44 +146,43 @@ describe "ObjectMother" do
       @name = :wilma
       @args = { :name => 'wilma' }
       ObjectMother.define_user @name, @args
-      @om = ObjectMother.new(@prototypes_dir)
+      ObjectMother.prototype_dir = @prototypes_dir
     end
 
     it "should respond to cached ids" do
-      @om.should respond_to(:cached_ids)
+      ObjectMother.should respond_to(:cached_ids)
     end
 
     it "should have a hash of cached ids" do
-      @om.cached_ids.should be_kind_of(Hash)
+      ObjectMother.cached_ids.should be_kind_of(Hash)
     end
 
     it "should cache the object ID against the name" do
-      @om.send(@name)
-      @om.cached_ids[@name].should == @user.id
+      ObjectMother.send(@name)
+      ObjectMother.cached_ids[@name].should == @user.id
     end
 
     it "should use the cached object ID to find the object" do
-      @om.send(@name)
-      @om.cached_ids[@name].should == @user.id
+      ObjectMother.send(@name)
+      ObjectMother.cached_ids[@name].should == @user.id
 
       User.should_receive(:find_by_id).with(@user.id)
-      @om.send(@name)
+      ObjectMother.send(@name)
     end
   end
 
   describe "chaining prototypes" do
     before(:each) do
-      @om = ObjectMother.new(@prototypes_dir)
-      @um = UserMother.new
-      @um.should respond_to(:user_prototype)
+      ObjectMother.prototype_dir = @prototypes_dir
+      UserMother.methods.should include('user_prototype')
 
       @name = 'fred'
       UserMother.define_user @name
     end
 
     it "should use the prototype" do
-      User.should_receive(:create).with(@um.user_prototype)
-      @um.send(@name)
+      User.should_receive(:create).with(UserMother.user_prototype)
+      UserMother.send(@name)
     end
 
     it "should merge the prototype with other arguments" do
@@ -185,45 +190,44 @@ describe "ObjectMother" do
       args = { :pet => true }
       UserMother.define_user(name, args)
 
-      expected_args = @um.user_prototype.merge(args)
+      expected_args = UserMother.user_prototype.merge(args)
       User.should_receive(:create).with(expected_args)
-      @um.send(name)
+      UserMother.send(name)
     end
   end
 
   describe "creating new objects based on prototypes" do
     before(:each) do
-      @om = ObjectMother.new(@prototypes_dir)
-      @um = UserMother.new
-      @um.should respond_to(:user_prototype)
+      ObjectMother.prototype_dir = @prototypes_dir
+      UserMother.should respond_to(:user_prototype)
     end
 
     it "should create an object based on the prototype" do
-      User.should_receive(:create).with(@um.user_prototype)
-      @um.create_user
+      User.should_receive(:create).with(UserMother.user_prototype)
+      UserMother.create_user
     end
 
     it "should cope if no prototype exists" do
-      @um.should_not respond_to(:rock_prototype)
+      UserMother.should_not respond_to(:rock_prototype)
       Rock.should_receive(:create).with({})
-      @um.create_rock
+      UserMother.create_rock
     end
 
     it "should merge hash args into the prototype" do
       args = { :pet => true, :barks => :like_a_dog }
-      User.should_receive(:create).with(@um.user_prototype.merge(args))
-      @um.create_user(args)
+      User.should_receive(:create).with(UserMother.user_prototype.merge(args))
+      UserMother.create_user(args)
     end
 
     it "should return the object" do
       user = User.new
       User.stub!(:create).and_return(user)
-      @um.create_user.should == user
+      UserMother.create_user.should == user
     end
 
     it "should call a given block" do
       called = nil
-      @um.create_user do |prototype|
+      UserMother.create_user do |prototype|
         called = true
       end
 
@@ -231,21 +235,21 @@ describe "ObjectMother" do
     end
 
     it "should pass the prototype into a given block" do
-      @um.create_user do |prototype|
-        prototype.should == @um.user_prototype
+      UserMother.create_user do |prototype|
+        prototype.should == UserMother.user_prototype
       end
     end
 
     it "should merge hash args into the prototype before calling the block" do
       args = { :pet => true, :barks => :like_a_dog }
-      @um.create_user(args) do |prototype|
-        prototype.should == @um.user_prototype.merge(args)
+      UserMother.create_user(args) do |prototype|
+        prototype.should == UserMother.user_prototype.merge(args)
       end
     end
 
     it "should return the result of a given block" do
       user = User.new
-      obj = @um.create_user do
+      obj = UserMother.create_user do
         user
       end
       obj.should == user
@@ -257,53 +261,50 @@ describe "ObjectMother" do
       @name = :yogi
       @args = { :name => 'yogi' }
       ObjectMother.define_user @name, @args
-      @om = ObjectMother.new(@prototypes_dir)
 
       @id = 123
-      @om.cached_ids[@name] = @id
+      ObjectMother.cached_ids[@name] = @id
     end
 
     it "should destroy cached objects" do
       User.should_receive(:destroy).with(@id)
-      @om.send("recreate_#{@name}")
+      ObjectMother.send("recreate_#{@name}")
     end
 
     it "should not try to destroy uncached objects" do
-      @om.cached_ids.delete(@name)
+      ObjectMother.cached_ids.delete(@name)
       User.should_not_receive(:destroy)
-      @om.send("recreate_#{@name}")
+      ObjectMother.send("recreate_#{@name}")
     end
 
     it "should create a new object from the prototype" do
       User.should_receive(:create).with(@args).and_return(nil)
-      @om.send("recreate_#{@name}")
+      ObjectMother.send("recreate_#{@name}")
     end
 
     it "should merge arguments into the prototype" do
       args = { :smarter_than_the_average_bear => true }
       User.should_receive(:create).with(@args.merge(args)).and_return(nil)
-      @om.send("recreate_#{@name}", args)
+      ObjectMother.send("recreate_#{@name}", args)
     end
   end
 
   describe "calling create if an exclaimation mark is given" do
     before(:each) do
       @name = :bobo
-      @om = ObjectMother.new(@prototypes_dir)
       ObjectMother.define_user(@name)
     end
 
     it "should work for defined methods" do
       User.should_receive(:create!)
-      @om.send("#{@name}!")
+      ObjectMother.send("#{@name}!")
     end
 
     it "should work when using the prototype" do
-      um = UserMother.new
-      um.should respond_to(:user_prototype)
+      UserMother.should respond_to(:user_prototype)
 
       User.should_receive(:create!)
-      um.send(:create_user!)
+      UserMother.send(:create_user!)
     end
   end
 end

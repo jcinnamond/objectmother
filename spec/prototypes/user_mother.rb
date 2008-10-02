@@ -1,5 +1,5 @@
 class UserMother < ObjectMother
-  def user_prototype
+  def self.user_prototype
     {
       :name => 'some_user',
       :pet => false
