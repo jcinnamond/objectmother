@@ -1,3 +1,103 @@
+# = ObjectMother
+# 
+# == What it is
+#
+# ObjectMother is a design pattern to help create objects to use in tests.
+# It was inspired by a paper[http://www.xpuniverse.com/2001/pdfs/Testing03.pdf]
+# by Peter Schuh and Stephanie Punke, and by an
+# article[http://www.martinfowler.com/articles/mocksArentStubs.html] entitled
+# <em>Mocks Aren't Stubs</em> by Martin Fowler.
+#
+# == Why it is useful
+#
+# ObjectMother replaces fixtures and uses ruby code to generate objects rather
+# than using YAML to specify attributes which are loaded into the database.
+# I believe that this brings a number of advantages:
+#
+# 1. Less typing is required to generate test data.
+# 1. It is easier to add or remove attributes to every object of a particular class.
+# 1. It is possible to decide at runtime how to define objects.
+# 1. The definitions of objects used for testing can be put closer to the test code.
+# 1. Validation is applied to the test objects.
+#
+# == How to use it
+#
+# Install the plugin.
+#
+# Under +spec+ (or +test+) create a directory named +prototype+. Under here,
+# create classes which inherit from ObjectMother.
+#
+# Use <tt>define_xxx :name</tt> to create named prototypes. Simply replace +xxx+ with
+# the name of the class to create and +name+ with the name of the prototype.
+# Then follow it up with hash arguments to be passed through to the class'
+# create method. For example:
+#
+#   define_access_role :admin, :name => 'admin', :admin => true
+#
+# Use a class method called +xxx_prototype+ to define the default attributes
+# that get merged into all objects created for that class. Again, +xxx+ is the
+# class name. For example:
+#
+#   def self.access_role_prototype
+#     next_role_count = AccessRole.count + 1
+#     {
+#       :name => "role_#{next_role_count}",
+#       :admin => false
+#     }
+#   end
+#
+# You then have access to these methods in your tests through two sets of
+# methods. The first of these provide access to the named prototypes. If the
+# above access roles had been configured in a class called +AccessRoles+, then
+# in your tests you can say:
+#
+#   AccessRoles.admin            # Calls AccessRole.create with the arguments
+#   AccessRoles.admin!           # As above, but uses create! so that exceptions are raised
+#   AccessRoles.recreate_admin   # Deletes any previous admin object and creates a new one
+#
+# The second set of methods use +xxx_prototype+ to create new objects. You can
+# say:
+#
+#   AccessRoles.create_access_role
+#   AccessRoles.create_access_role!
+#
+# == Overriding the prototypes
+#
+# All of the methods that you use in your tests allow you to override the
+# prototype used to create the object. For example, in your test you can call:
+#
+#   AccessRoles.admin(:name => 'superuser')
+#
+# This will override the +name+ of the object created, but continue to use
+# the other attributes that were defined for +admin+.
+#
+# The same can be used for the create methods:
+#
+#   AccessRoles.create_access_role(:name => 'root', :admin => true)
+#
+# You can even give a block to the method to override the actual creation. This
+# block is passed the hash of arguments that would otherwise have been passed
+# to create. For example:
+#
+#   AccessRoles.create_access_role do |options|
+#     options.delete[:admin] if AccessRole.find_by_admin(true)
+#
+#     role = AccessRole.create(options)
+#     Users.find(:all).each do |user|
+#       user.access_roles << role
+#     end
+#
+#     role
+#   end
+#
+# All methods can be passed blocks (including +define_xxx+) if your needs are
+# complex. All object creation will merge the various options in the following
+# order (highest precedence first)
+#
+#  1. Options passed in on use (AccessRoles.admin(:name => 'superuser')
+#  2. Options given in the named prototype (define_access_role :admin, ...)
+#  3. Options given in the prototype for that class (self.access_role_prototype ...)
+#
 class ObjectMother
   RSPEC_PROTOTYPE_DIR = File.join(RAILS_ROOT, 'spec', 'object_mother')
   TEST_PROTOTYPE_DIR = File.join(RAILS_ROOT, 'test', 'object_mother')
@@ -73,8 +173,8 @@ class ObjectMother
     # ------------------------------------------------------------------------
     # Method missing magic.
     #
-    # This picks up define_xxx or create_xxx methods and routes them
-    # appropraitely.
+    # This picks up define_xxx, create_xxx and truncate_xxx methods and routes
+    # them appropraitely.
     def method_missing (sym, *args, &block)
       matchdata = %r{^define_?(.*)}.match(sym.to_s)
       if matchdata
@@ -88,6 +188,12 @@ class ObjectMother
         return create_from_prototype(matchdata[1], hashargs, matchdata[2] == '!', &block)
       end
 
+      matchdata = %r{^truncate_(.*)}.match(sym.to_s)
+      if matchdata
+        hashargs = args.first || {}
+        return truncate(matchdata[1])
+      end
+
       super
     end
 
@@ -95,11 +201,11 @@ class ObjectMother
     # ------------------------------------------------------------------------
     # Defining prototypes
 
-    # Creates methods matching a named prototypes. This allows you to user:
+    # Creates methods matching a named prototypes. This allows you to use:
     #
     #   define_user :john, :name => 'John'
     #
-    # to define a method called <tt>john</tt> that creates a new User object,
+    # to define a method called +john+ that creates a new User object,
     # passing in <tt>{ :name => 'John' }</tt> to the create method.
     #
     # You can also specify a block which takes care of the creation of the
@@ -213,6 +319,14 @@ class ObjectMother
         method = :create! if raise_exceptions
         klass.send(method, merged_args)
       end
+    end
+
+    # ------------------------------------------------------------------------
+    # Deleting objects
+
+    def truncate (name)
+      klass = Object.const_get(classify(name))
+      klass.delete_all
     end
 
     # ------------------------------------------------------------------------

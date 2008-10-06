@@ -307,5 +307,12 @@ describe "ObjectMother" do
       UserMother.send(:create_user!)
     end
   end
+
+  describe "truncating tables" do
+    it "should call delete_all on the matching class" do
+      User.should_receive(:delete_all)
+      ObjectMother.truncate_user
+    end
+  end
 end
 
