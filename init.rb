@@ -1,3 +1,3 @@
 if RAILS_ENV == "test"
-  ObjectMother.new
+  ObjectMother.prototype_dir
 end
